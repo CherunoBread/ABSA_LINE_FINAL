@@ -157,7 +157,7 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
         try:
             with st.spinner(f"Mengambil {n} ulasan terbaru..."):
                 data, _ = gp_reviews(
-                    "com.linecorp.line", 
+                    "jp.naver.line.android", 
                     lang="id", 
                     country="id",
                     sort=Sort.NEWEST, 
