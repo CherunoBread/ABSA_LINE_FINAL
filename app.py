@@ -1,8 +1,10 @@
 import streamlit as st
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')  # Set backend sebelum import pyplot
 import matplotlib.pyplot as plt
 from huggingface_hub import login
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline, AutoModel
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 from google_play_scraper import Sort, reviews as gp_reviews
 import numpy as np
 
@@ -12,22 +14,35 @@ login(token=st.secrets.huggingface.token, add_to_git_credential=False)
 st.set_page_config(page_title="ABSA LINE Reviews", layout="wide")
 st.title("Analisis Sentimen Berbasis Aspek — LINE Reviews")
 
+# Load preprocessing function from HuggingFace
+@st.cache_resource
+def load_preprocessing_function():
+    """Load preprocessing function from HuggingFace Hub"""
+    try:
+        # Download file preprocessing dari HuggingFace Hub
+        preprocessing_file = hf_hub_download(
+            repo_id="Cheruno/text_preprocessor",
+            filename="modeling_text_preprocessor.py",
+            repo_type="model"
+        )
+        
+        # Load module dari file
+        spec = importlib.util.spec_from_file_location("preprocessing", preprocessing_file)
+        preprocessing_module = importlib.util.module_from_spec(spec)
+        sys.modules["preprocessing"] = preprocessing_module
+        spec.loader.exec_module(preprocessing_module)
+        
+        return preprocessing_module.clean_text
+    except Exception as e:
+        st.warning(f"Gagal memuat preprocessing dari HuggingFace: {str(e)}")
+        st.info("Menggunakan preprocessing lokal sebagai fallback...")
+        return local_clean_text
+
 # Load models
 @st.cache_resource
 def load_models():
-    """Load the preprocessing model and three fine-tuned models from HuggingFace"""
+    """Load the three fine-tuned models from HuggingFace"""
     models = {}
-    
-    # Load preprocessing model
-    try:
-        preprocessing_model = AutoModel.from_pretrained("Cheruno/text_preprocessor", trust_remote_code=True)
-        models["preprocessor"] = preprocessing_model
-        st.success("Model preprocessing berhasil dimuat")
-    except Exception as e:
-        st.error(f"Gagal memuat model preprocessing: {str(e)}")
-        st.stop()
-    
-    # Load sentiment analysis models
     model_names = {
         "Topic_1": "Cheruno/Topic_1",
         "Topic_2": "Cheruno/Topic_2", 
@@ -60,11 +75,20 @@ def predict_sentiment_for_topic(text, model_pipeline):
         st.error(f"Error in prediction: {str(e)}")
         return "Netral"
 
-def predict_all_topics(text, models):
+def predict_all_topics(text, models, preprocessor=None):
     """Predict sentiment for all three topics with preprocessing"""
     # Preprocess text first
-    preprocessor = models["preprocessor"]
-    cleaned_text = preprocessor.preprocess(text)
+    if preprocessor:
+        cleaned_text = preprocessor.preprocess(text)
+    else:
+        # Fallback preprocessing
+        import re
+        cleaned_text = text.lower() if isinstance(text, str) else ""
+        cleaned_text = re.sub(r"http\S+|www\S+|https\S+", "", cleaned_text)
+        cleaned_text = re.sub(r'[^\w\s]', '', cleaned_text)
+        cleaned_text = re.sub(r"\d+", "", cleaned_text)
+        cleaned_text = re.sub(r'[^a-zA-Z\s]', '', cleaned_text)
+        cleaned_text = re.sub(r"\s+", " ", cleaned_text).strip()
     
     predictions = {}
     for topic in ["Topic_1", "Topic_2", "Topic_3"]:
@@ -81,12 +105,16 @@ n = st.sidebar.selectbox("Jumlah ulasan:", [10, 50, 100, 500, 1000], index=2)
 
 if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
     
-    # Load models
-    with st.spinner("Memuat model..."):
+    # Load preprocessing model
+    with st.spinner("Memuat model preprocessing..."):
+        preprocessor = load_preprocessing_model()
+    
+    # Load sentiment analysis models
+    with st.spinner("Memuat model sentimen..."):
         models = load_models()
     
     if not models:
-        st.error("Gagal memuat model. Silakan coba lagi.")
+        st.error("Gagal memuat model sentimen. Silakan coba lagi.")
         st.stop()
     
     # Scraping function
