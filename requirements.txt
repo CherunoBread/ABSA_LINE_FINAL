@@ -6,5 +6,3 @@ huggingface_hub
 google-play-scraper
 matplotlib
 numpy
-importlib-util
-regex
