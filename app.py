@@ -99,7 +99,17 @@ def predict_sentiment_for_topic(text, model_pipeline):
         results = model_pipeline(text)
         # Get the highest score prediction
         best_pred = max(results[0], key=lambda x: x['score'])
-        return best_pred['label']
+        
+        # Map numerical labels to text labels
+        label_mapping = {
+            'LABEL_0': 'Negatif',
+            'LABEL_1': 'Netral', 
+            'LABEL_2': 'Positif'
+        }
+        
+        predicted_label = best_pred['label']
+        return label_mapping.get(predicted_label, predicted_label)
+        
     except Exception as e:
         st.error(f"Error in prediction: {str(e)}")
         return "Netral"
@@ -147,7 +157,7 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
         try:
             with st.spinner(f"Mengambil {n} ulasan terbaru..."):
                 data, _ = gp_reviews(
-                    "jp.naver.line.android", 
+                    "com.linecorp.line", 
                     lang="id", 
                     country="id",
                     sort=Sort.NEWEST, 
@@ -318,17 +328,41 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
             # Create pie chart only if there's data
             if not sentiment_counts.empty:
                 fig, ax = plt.subplots(figsize=(6, 6))
-                colors = {'Positif': '#28a745', 'Negatif': '#dc3545', 'Netral': '#ffc107'}
-                sentiment_colors = [colors.get(sentiment, '#6c757d') for sentiment in sentiment_counts.index]
                 
-                ax.pie(sentiment_counts.values, 
-                       labels=sentiment_counts.index,
-                       autopct='%1.1f%%',
-                       colors=sentiment_colors,
-                       startangle=90)
-                ax.set_title(f"Distribusi Sentimen\n{topic.replace('_', ' ')}")
+                # Define colors for each sentiment
+                colors = {'Positif': '#28a745', 'Negatif': '#dc3545', 'Netral': '#ffc107'}
+                
+                # Create color list based on actual sentiments present
+                sentiment_colors = []
+                for sentiment in sentiment_counts.index:
+                    if sentiment in colors:
+                        sentiment_colors.append(colors[sentiment])
+                    else:
+                        sentiment_colors.append('#6c757d')  # Default gray for unknown sentiments
+                
+                # Create pie chart
+                wedges, texts, autotexts = ax.pie(
+                    sentiment_counts.values, 
+                    labels=sentiment_counts.index,
+                    autopct='%1.1f%%',
+                    colors=sentiment_colors,
+                    startangle=90
+                )
+                
+                # Style the text
+                for autotext in autotexts:
+                    autotext.set_color('white')
+                    autotext.set_fontweight('bold')
+                
+                ax.set_title(f"Distribusi Sentimen\n{topic.replace('_', ' ')}", 
+                           fontsize=10, fontweight='bold')
                 st.pyplot(fig)
                 plt.close()
+                
+                # Show sentiment counts as well
+                st.write("Detail:")
+                for sentiment, count in sentiment_counts.items():
+                    st.write(f"• {sentiment}: {count}")
             else:
                 st.write("Tidak ada data untuk ditampilkan")
 
@@ -349,14 +383,34 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
         # Create overall pie chart
         fig, ax = plt.subplots(figsize=(8, 8))
         colors = {'Positif': '#28a745', 'Negatif': '#dc3545', 'Netral': '#ffc107'}
-        sentiment_colors = [colors.get(sentiment, '#6c757d') for sentiment in overall_counts.index]
+        
+        # Create color list based on actual sentiments present
+        sentiment_colors = []
+        for sentiment in overall_counts.index:
+            if sentiment in colors:
+                sentiment_colors.append(colors[sentiment])
+            else:
+                sentiment_colors.append('#6c757d')  # Default gray
 
-        ax.pie(overall_counts.values, 
-               labels=overall_counts.index,
-               autopct='%1.1f%%',
-               colors=sentiment_colors,
-               startangle=90)
-        ax.set_title("Distribusi Sentimen Keseluruhan")
+        wedges, texts, autotexts = ax.pie(
+            overall_counts.values, 
+            labels=overall_counts.index,
+            autopct='%1.1f%%',
+            colors=sentiment_colors,
+            startangle=90
+        )
+        
+        # Style the text
+        for autotext in autotexts:
+            autotext.set_color('white')
+            autotext.set_fontweight('bold')
+            autotext.set_fontsize(12)
+        
+        for text in texts:
+            text.set_fontsize(12)
+            text.set_fontweight('bold')
+        
+        ax.set_title("Distribusi Sentimen Keseluruhan", fontsize=14, fontweight='bold')
         st.pyplot(fig)
         plt.close()
 
@@ -374,6 +428,12 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
             negative_ratio = (pd.Series(all_sentiments) == 'Negatif').sum() / len(all_sentiments) * 100
             st.metric("Sentimen Positif", f"{positive_ratio:.1f}%")
             st.metric("Sentimen Negatif", f"{negative_ratio:.1f}%")
+            
+        # Show detailed counts
+        st.subheader("Detail Distribusi Sentimen")
+        for sentiment, count in overall_counts.items():
+            percentage = (count / len(all_sentiments)) * 100
+            st.write(f"**{sentiment}**: {count} ulasan ({percentage:.1f}%)")
     else:
         st.warning("Tidak ada data sentimen untuk ditampilkan")
 
