@@ -3,16 +3,45 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')  # Set backend sebelum import pyplot
 import matplotlib.pyplot as plt
-from huggingface_hub import login
+from huggingface_hub import login, hf_hub_download
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 from google_play_scraper import Sort, reviews as gp_reviews
 import numpy as np
+import importlib.util
+import sys
+import re
 
 # Login ke HF (ambil token dari secrets.toml)
 login(token=st.secrets.huggingface.token, add_to_git_credential=False)
 
 st.set_page_config(page_title="ABSA LINE Reviews", layout="wide")
 st.title("Analisis Sentimen Berbasis Aspek — LINE Reviews")
+
+# Local fallback preprocessing function
+def local_clean_text(text):
+    """Local fallback preprocessing function"""
+    if not isinstance(text, str):
+        return ""
+    
+    # Convert to lowercase
+    text = text.lower()
+    
+    # Remove URLs
+    text = re.sub(r"http\S+|www\S+|https\S+", "", text)
+    
+    # Remove punctuation
+    text = re.sub(r'[^\w\s]', '', text)
+    
+    # Remove numbers
+    text = re.sub(r"\d+", "", text)
+    
+    # Remove non-alphabetic characters
+    text = re.sub(r'[^a-zA-Z\s]', '', text)
+    
+    # Remove extra whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+    
+    return text
 
 # Load preprocessing function from HuggingFace
 @st.cache_resource
@@ -79,16 +108,10 @@ def predict_all_topics(text, models, preprocessor=None):
     """Predict sentiment for all three topics with preprocessing"""
     # Preprocess text first
     if preprocessor:
-        cleaned_text = preprocessor.preprocess(text)
+        cleaned_text = preprocessor(text)  # Call the function directly
     else:
         # Fallback preprocessing
-        import re
-        cleaned_text = text.lower() if isinstance(text, str) else ""
-        cleaned_text = re.sub(r"http\S+|www\S+|https\S+", "", cleaned_text)
-        cleaned_text = re.sub(r'[^\w\s]', '', cleaned_text)
-        cleaned_text = re.sub(r"\d+", "", cleaned_text)
-        cleaned_text = re.sub(r'[^a-zA-Z\s]', '', cleaned_text)
-        cleaned_text = re.sub(r"\s+", " ", cleaned_text).strip()
+        cleaned_text = local_clean_text(text)
     
     predictions = {}
     for topic in ["Topic_1", "Topic_2", "Topic_3"]:
@@ -105,9 +128,9 @@ n = st.sidebar.selectbox("Jumlah ulasan:", [10, 50, 100, 500, 1000], index=2)
 
 if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
     
-    # Load preprocessing model
-    with st.spinner("Memuat model preprocessing..."):
-        preprocessor = load_preprocessing_model()
+    # Load preprocessing function
+    with st.spinner("Memuat fungsi preprocessing..."):
+        preprocessor = load_preprocessing_function()  # Fixed function name
     
     # Load sentiment analysis models
     with st.spinner("Memuat model sentimen..."):
@@ -155,36 +178,36 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
         progress_bar = st.progress(0)
         
         # Initialize result columns
-        for topic in ["Topic_1", "Topic_2", "Topic_3"]:
-            df[f"{topic}_Sentiment"] = ""
+        topic_mapping = {
+            "Topic_1": "Topic_1_Pengalaman_Umum_Penggunaan_LINE",
+            "Topic_2": "Topic_2_Fitur_Tambahan", 
+            "Topic_3": "Topic_3_Login_dan_Registrasi_Akun"
+        }
+        
+        for topic in topic_mapping.values():
+            df[topic] = ""
         
         # Add cleaned text column
         df["cleaned_content"] = ""
         
         # Process each review
         for idx, row in df.iterrows():
-            predictions, cleaned_text = predict_all_topics(row["content"], models)
+            predictions, cleaned_text = predict_all_topics(row["content"], models, preprocessor)
             
             # Store cleaned text
             df.at[idx, "cleaned_content"] = cleaned_text
             
-            # Map predictions to readable format
-            topic_mapping = {
-                "Topic_1": "Topic_1_Pengalaman_Umum_Penggunaan_LINE",
-                "Topic_2": "Topic_2_Fitur_Tambahan", 
-                "Topic_3": "Topic_3_Login_dan_Registrasi_Akun"
-            }
-            
+            # Store predictions
             for topic, sentiment in predictions.items():
                 readable_topic = topic_mapping[topic]
-                df.at[idx, f"{readable_topic}"] = sentiment
+                df.at[idx, readable_topic] = sentiment
             
             # Update progress
             progress_bar.progress((idx + 1) / len(df))
         
         progress_bar.empty()
 
-    # Rename columns to match your data format
+    # Topic columns for results
     topic_columns = [
         "Topic_1_Pengalaman_Umum_Penggunaan_LINE",
         "Topic_2_Fitur_Tambahan", 
@@ -219,19 +242,22 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
             # Count sentiments for this topic
             sentiment_counts = df[topic].value_counts()
             
-            # Create pie chart
-            fig, ax = plt.subplots(figsize=(6, 6))
-            colors = {'Positif': '#28a745', 'Negatif': '#dc3545', 'Netral': '#ffc107'}
-            sentiment_colors = [colors.get(sentiment, '#6c757d') for sentiment in sentiment_counts.index]
-            
-            ax.pie(sentiment_counts.values, 
-                   labels=sentiment_counts.index,
-                   autopct='%1.1f%%',
-                   colors=sentiment_colors,
-                   startangle=90)
-            ax.set_title(f"Distribusi Sentimen\n{topic.replace('_', ' ')}")
-            st.pyplot(fig)
-            plt.close()
+            # Create pie chart only if there's data
+            if not sentiment_counts.empty:
+                fig, ax = plt.subplots(figsize=(6, 6))
+                colors = {'Positif': '#28a745', 'Negatif': '#dc3545', 'Netral': '#ffc107'}
+                sentiment_colors = [colors.get(sentiment, '#6c757d') for sentiment in sentiment_counts.index]
+                
+                ax.pie(sentiment_counts.values, 
+                       labels=sentiment_counts.index,
+                       autopct='%1.1f%%',
+                       colors=sentiment_colors,
+                       startangle=90)
+                ax.set_title(f"Distribusi Sentimen\n{topic.replace('_', ' ')}")
+                st.pyplot(fig)
+                plt.close()
+            else:
+                st.write("Tidak ada data untuk ditampilkan")
 
     # Overall sentiment distribution
     st.subheader("📊 Distribusi Sentimen Keseluruhan")
@@ -241,36 +267,42 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
     for topic in topic_columns:
         all_sentiments.extend(df[topic].tolist())
     
-    overall_counts = pd.Series(all_sentiments).value_counts()
+    # Remove empty values
+    all_sentiments = [s for s in all_sentiments if s and s.strip()]
     
-    # Create overall pie chart
-    fig, ax = plt.subplots(figsize=(8, 8))
-    colors = {'Positif': '#28a745', 'Negatif': '#dc3545', 'Netral': '#ffc107'}
-    sentiment_colors = [colors.get(sentiment, '#6c757d') for sentiment in overall_counts.index]
+    if all_sentiments:
+        overall_counts = pd.Series(all_sentiments).value_counts()
+        
+        # Create overall pie chart
+        fig, ax = plt.subplots(figsize=(8, 8))
+        colors = {'Positif': '#28a745', 'Negatif': '#dc3545', 'Netral': '#ffc107'}
+        sentiment_colors = [colors.get(sentiment, '#6c757d') for sentiment in overall_counts.index]
 
-    ax.pie(overall_counts.values, 
-           labels=overall_counts.index,
-           autopct='%1.1f%%',
-           colors=sentiment_colors,
-           startangle=90)
-    ax.set_title("Distribusi Sentimen Keseluruhan")
-    st.pyplot(fig)
-    plt.close()
+        ax.pie(overall_counts.values, 
+               labels=overall_counts.index,
+               autopct='%1.1f%%',
+               colors=sentiment_colors,
+               startangle=90)
+        ax.set_title("Distribusi Sentimen Keseluruhan")
+        st.pyplot(fig)
+        plt.close()
 
-    # Summary statistics
-    st.subheader("📋 Ringkasan Statistik")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.metric("Total Ulasan", len(df))
-        st.metric("Rata-rata Rating", f"{df['score'].mean():.2f}/5")
-    
-    with col2:
-        positive_ratio = (pd.Series(all_sentiments) == 'Positif').sum() / len(all_sentiments) * 100
-        negative_ratio = (pd.Series(all_sentiments) == 'Negatif').sum() / len(all_sentiments) * 100
-        st.metric("Sentimen Positif", f"{positive_ratio:.1f}%")
-        st.metric("Sentimen Negatif", f"{negative_ratio:.1f}%")
+        # Summary statistics
+        st.subheader("📋 Ringkasan Statistik")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric("Total Ulasan", len(df))
+            st.metric("Rata-rata Rating", f"{df['score'].mean():.2f}/5")
+        
+        with col2:
+            positive_ratio = (pd.Series(all_sentiments) == 'Positif').sum() / len(all_sentiments) * 100
+            negative_ratio = (pd.Series(all_sentiments) == 'Negatif').sum() / len(all_sentiments) * 100
+            st.metric("Sentimen Positif", f"{positive_ratio:.1f}%")
+            st.metric("Sentimen Negatif", f"{negative_ratio:.1f}%")
+    else:
+        st.warning("Tidak ada data sentimen untuk ditampilkan")
 
     # Download results
     st.subheader("💾 Unduh Hasil")
