@@ -15,7 +15,7 @@ import re
 login(token=st.secrets.huggingface.token, add_to_git_credential=False)
 
 st.set_page_config(page_title="ABSA LINE Reviews", layout="wide")
-st.title("Analisis Sentimen Berbasis Aspek — LINE Reviews")
+st.title("Analisis Sentimen Berbasis Aspek — LINE Reviews : Buka Sidebar Untuk Memulai Analisis")
 
 # Local fallback preprocessing function
 def local_clean_text(text):
@@ -133,7 +133,7 @@ def predict_all_topics(text, models, preprocessor=None):
     return predictions, cleaned_text
 
 # Sidebar
-st.sidebar.header("Pengaturan Analisis")
+st.sidebar.header("Pilih Jumlah Ulasan Yang Akan Di Analisis")
 n = st.sidebar.selectbox("Jumlah ulasan:", [10, 50, 100, 500, 1000], index=2)
 
 if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
