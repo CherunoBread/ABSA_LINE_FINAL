@@ -3,71 +3,164 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')  # Set backend sebelum import pyplot
 import matplotlib.pyplot as plt
-from huggingface_hub import login, hf_hub_download
+from huggingface_hub import login
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 from google_play_scraper import Sort, reviews as gp_reviews
 import numpy as np
-import importlib.util
-import sys
 import re
 
 # Login ke HF (ambil token dari secrets.toml)
-login(token=st.secrets.huggingface.token, add_to_git_credential=False)
+# Pastikan Anda memiliki file .streamlit/secrets.toml dengan token
+if 'huggingface' in st.secrets:
+    login(token=st.secrets.huggingface.token, add_to_git_credential=False)
 
 st.set_page_config(page_title="ABSA LINE Reviews", layout="wide")
-st.title("Analisis Sentimen Berbasis Aspek — LINE Reviews : Buka Sidebar Untuk Memulai Analisis")
+st.title("Analisis Sentimen Berbasis Aspek — LINE Reviews")
+st.markdown("### Buka Sidebar Untuk Memulai Analisis")
 
-# Local fallback preprocessing function
+# ==========================================
+# 1. RESOURCE & PREPROCESSING
+# ==========================================
+
+@st.cache_data
+def get_text_resources():
+    """Memuat dictionary normalisasi dan stopwords"""
+    norm_dict = {
+        "gak": "tidak", "ga": "tidak", "gk": "tidak", "tdk": "tidak", "enggak": "tidak", 
+        "nggak": "tidak", "kagak": "tidak",
+        "gw": "saya", "gua": "saya", "aku": "saya", "sy": "saya", "gue": "saya",
+        "lu": "kamu", "lo": "kamu", "km": "kamu", "kalian": "kamu",
+        "yg": "yang", "kalo": "kalau", "klo": "kalau", 
+        "krn": "karena", "karna": "karena", 
+        "utk": "untuk", "untk": "untuk", 
+        "dgn": "dengan", "dlm": "dalam", 
+        "sdh": "sudah", "udh": "sudah", "udah": "sudah",
+        "blm": "belum", 
+        "jg": "juga", "jga": "juga", 
+        "tp": "tetapi", "tapi": "tetapi", 
+        "aja": "saja", "aj": "saja", 
+        "bgt": "sangat", "banget": "sangat", 
+        "knp": "kenapa", "napa": "kenapa", 
+        "gmn": "bagaimana", "gimana": "bagaimana", 
+        "bs": "bisa", "bisaa": "bisa", "gabisa": "tidak bisa", "ga bisa": "tidak bisa",
+        "trus": "terus", "trs": "terus", 
+        "jd": "jadi", "jdi": "jadi", 
+        "pdhl": "padahal", 
+        "bnyk": "banyak", 
+        "sm": "sama", 
+        "lbh": "lebih", 
+        "dr": "dari",
+        "eror": "error", "erorr": "error", "errorr": "error", 
+        "apk": "aplikasi", "apps": "aplikasi", "aplikasine": "aplikasi",
+        "hp": "ponsel", "handphone": "ponsel", 
+        "download": "unduh", "donlot": "unduh", 
+        "update": "pembaruan", "updet": "pembaruan", 
+        "login": "masuk", "log in": "masuk", "sign in": "masuk",
+        "log out": "keluar", 
+        "notif": "notifikasi", 
+        "verif": "verifikasi", 
+        "no": "nomor", "nmr": "nomor", 
+        "pw": "kata sandi", "password": "kata sandi", "sandi": "kata sandi",
+        "chat": "pesan", "chatting": "pesan", 
+        "call": "panggilan", "nelpon": "panggilan", "telfon": "panggilan",
+        "voom": "timeline", "line voom": "timeline",
+        "tolong": "mohon", "pls": "mohon", "please": "mohon", "plis": "mohon",
+        "balikin": "kembalikan", 
+        "ilang": "hilang", 
+        "tau": "tahu", 
+        "liat": "lihat", 
+        "cuman": "hanya", "cuma": "hanya",
+        "makasih": "terima kasih", "tq": "terima kasih",
+        "mulu": "terus", "melulu": "terus",
+        "bener": "benar",
+        "sampe": "sampai",
+        "kapan": "kapan",
+        "kocakk": "kocak"
+    }
+
+    custom_stopwords = {
+        "dan", "atau", "tetapi", "tapi", "juga", 
+        "yang", "di", "ke", "dari", "pada", "dalam", "untuk", "bagi", "kepada", "oleh",
+        "ini", "itu", "tersebut", "disini", "disitu", 
+        "saya", "aku", "kamu", "dia", "mereka", "kita", "kami", "anda", "kalian",
+        "bisa", "dapat", "akan", "sedang", "sudah", "telah", "masih", "belum",
+        "ada", "adalah", "ialah", "merupakan", "sebagai", "seperti",
+        "sih", "dong", "deh", "kok", "lah", "mah", "kan", "pun", "doang",
+        "nya", 
+        "saja", "aja", 
+        "padahal", "walaupun", "meskipun", 
+        "karena", "sebab", "akibat", "sehingga", "maka",
+        "terus", "lalu", "kemudian", "akhirnya",
+        "sangat", "banget", "sekali", "terlalu",
+        "mohon", "tolong", "harap", "silakan", 
+        "terima", "kasih", "makasih",
+        "tanya", "tahu", "kasih", "banyak", "sedikit", "kurang", "lebih",
+        "hari", "tanggal", "bulan", "tahun", "jam", "waktu",
+        "kali", "tiap", "setiap", 
+        "apa", "kenapa", "bagaimana", "dimana", "siapa", 
+        "halo", "hai", "min", "admin", "kak", "gan", "sis", "bro"
+    }
+    
+    return norm_dict, custom_stopwords
+
 def local_clean_text(text):
-    """Local fallback preprocessing function"""
+    """
+    Preprocessing lengkap: Cleaning -> Normalization -> Stopword Removal
+    """
     if not isinstance(text, str):
         return ""
     
-    # Convert to lowercase
+    # Load resources (Cached)
+    norm_dict, custom_stopwords = get_text_resources()
+
+    # 1. Lowercase
     text = text.lower()
     
-    # Remove URLs
+    # 2. Hapus URL
     text = re.sub(r"http\S+|www\S+|https\S+", "", text)
+
+    # 3. Penanganan Normalisasi Frasa (Sebelum Split)
+    # Mengubah "ga bisa" -> "tidak bisa" agar tidak terpisah
+    phrase_fixes = {
+        "ga bisa": "tidak bisa",
+        "gabisa": "tidak bisa",
+        "log in": "masuk",
+        "sign in": "masuk",
+        "log out": "keluar",
+        "line voom": "timeline"
+    }
+    for phrase, replacement in phrase_fixes.items():
+        text = text.replace(phrase, replacement)
+
+    # 4. Hapus Angka & Simbol (Hanya sisakan huruf dan spasi)
+    # Pattern ini menghapus semua kecuali huruf a-z dan spasi
+    text = re.sub(r'[^a-z\s]', ' ', text)
     
-    # Remove punctuation
-    text = re.sub(r'[^\w\s]', '', text)
-    
-    # Remove numbers
-    text = re.sub(r"\d+", "", text)
-    
-    # Remove non-alphabetic characters
-    text = re.sub(r'[^a-zA-Z\s]', '', text)
-    
-    # Remove extra whitespace
+    # 5. Hapus whitespace berlebih
     text = re.sub(r"\s+", " ", text).strip()
     
-    return text
-
-# Load preprocessing function from HuggingFace
-@st.cache_resource
-def load_preprocessing_function():
-    """Load preprocessing function from HuggingFace Hub"""
-    try:
-        # Download file preprocessing dari HuggingFace Hub
-        preprocessing_file = hf_hub_download(
-            repo_id="Cheruno/text_preprocessor",
-            filename="modeling_text_preprocessor.py",
-            repo_type="model"
-        )
+    # 6. Tokenisasi (Split)
+    words = text.split()
+    
+    # 7. Loop Normalisasi & Stopword Removal
+    cleaned_words = []
+    for word in words:
+        # Normalisasi: Cek di dictionary, jika tidak ada pakai kata asli
+        word = norm_dict.get(word, word)
         
-        # Load module dari file
-        spec = importlib.util.spec_from_file_location("preprocessing", preprocessing_file)
-        preprocessing_module = importlib.util.module_from_spec(spec)
-        sys.modules["preprocessing"] = preprocessing_module
-        spec.loader.exec_module(preprocessing_module)
-        
-        return preprocessing_module.clean_text
-    except Exception as e:
-        st.warning(f"Gagal memuat preprocessing dari HuggingFace: {str(e)}")
-        st.info("Menggunakan preprocessing lokal sebagai fallback...")
-        return local_clean_text
+        # Stopword Removal:
+        # Masukkan kata jika: (BUKAN stopword DAN panjang > 1) ATAU (kata adalah "tidak")
+        # Kata "tidak" dikecualikan dari stopword removal karena penting untuk sentimen negatif
+        if (word not in custom_stopwords and len(word) > 1) or word == "tidak":
+            cleaned_words.append(word)
+            
+    # 8. Gabungkan kembali
+    return " ".join(cleaned_words)
 
-# Load models
+# ==========================================
+# 2. LOAD MODELS
+# ==========================================
+
 @st.cache_resource
 def load_models():
     """Load the three fine-tuned models from HuggingFace"""
@@ -92,10 +185,17 @@ def load_models():
     
     return models
 
-# Prediction functions
+# ==========================================
+# 3. PREDICTION FUNCTIONS
+# ==========================================
+
 def predict_sentiment_for_topic(text, model_pipeline):
     """Predict sentiment using the loaded model pipeline"""
     try:
+        # Jika teks kosong setelah preprocessing, anggap Netral
+        if not text or text.strip() == "":
+            return "Netral"
+
         results = model_pipeline(text)
         # Get the highest score prediction
         best_pred = max(results[0], key=lambda x: x['score'])
@@ -111,17 +211,13 @@ def predict_sentiment_for_topic(text, model_pipeline):
         return label_mapping.get(predicted_label, predicted_label)
         
     except Exception as e:
-        st.error(f"Error in prediction: {str(e)}")
+        # Jika error, return Netral agar aplikasi tidak crash
         return "Netral"
 
-def predict_all_topics(text, models, preprocessor=None):
-    """Predict sentiment for all three topics with preprocessing"""
-    # Preprocess text first
-    if preprocessor:
-        cleaned_text = preprocessor(text)  # Call the function directly
-    else:
-        # Fallback preprocessing
-        cleaned_text = local_clean_text(text)
+def predict_all_topics(text, models):
+    """Predict sentiment for all three topics with LOCAL preprocessing"""
+    # 1. Gunakan preprocessing lokal yang sudah diperbarui
+    cleaned_text = local_clean_text(text)
     
     predictions = {}
     for topic in ["Topic_1", "Topic_2", "Topic_3"]:
@@ -132,15 +228,14 @@ def predict_all_topics(text, models, preprocessor=None):
     
     return predictions, cleaned_text
 
-# Sidebar
+# ==========================================
+# 4. SIDEBAR & MAIN APP LOGIC
+# ==========================================
+
 st.sidebar.header("Pilih Jumlah Ulasan Yang Akan Di Analisis")
 n = st.sidebar.selectbox("Jumlah ulasan:", [10, 50, 100, 500, 1000], index=2)
 
 if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
-    
-    # Load preprocessing function
-    with st.spinner("Memuat fungsi preprocessing..."):
-        preprocessor = load_preprocessing_function()  # Fixed function name
     
     # Load sentiment analysis models
     with st.spinner("Memuat model sentimen..."):
@@ -165,11 +260,7 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
                 )
                 df = pd.DataFrame(data)
                 
-                # Debug: Show available columns
-                st.write("Debug - Available columns:", df.columns.tolist())
-                st.write("Debug - Data shape:", df.shape)
-                
-                # Check which columns are available and map them accordingly
+                # Mapping Columns
                 available_cols = []
                 col_mapping = {
                     'content': ['content', 'review', 'reviewText', 'text'],
@@ -180,41 +271,19 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
                 final_df = pd.DataFrame()
                 
                 # Map content column
-                content_col = None
-                for col in col_mapping['content']:
-                    if col in df.columns:
-                        content_col = col
-                        break
-                
+                content_col = next((col for col in col_mapping['content'] if col in df.columns), None)
                 if content_col:
                     final_df['content'] = df[content_col]
                 else:
-                    st.error("Kolom konten tidak ditemukan dalam data")
                     return pd.DataFrame()
                 
                 # Map score column
-                score_col = None
-                for col in col_mapping['score']:
-                    if col in df.columns:
-                        score_col = col
-                        break
-                
-                if score_col:
-                    final_df['score'] = df[score_col]
-                else:
-                    final_df['score'] = 5  # Default score
+                score_col = next((col for col in col_mapping['score'] if col in df.columns), None)
+                final_df['score'] = df[score_col] if score_col else 5
                 
                 # Map date column
-                date_col = None
-                for col in col_mapping['at']:
-                    if col in df.columns:
-                        date_col = col
-                        break
-                
-                if date_col:
-                    final_df['at'] = df[date_col]
-                else:
-                    final_df['at'] = pd.Timestamp.now()  # Default timestamp
+                date_col = next((col for col in col_mapping['at'] if col in df.columns), None)
+                final_df['at'] = df[date_col] if date_col else pd.Timestamp.now()
                 
                 return final_df
                 
@@ -227,7 +296,6 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
     
     if df.empty:
         st.warning("Gagal mengambil ulasan dari Google Play Store. Menggunakan data sample untuk demo...")
-        # Create sample data for demonstration
         sample_reviews = [
             "Line sangat bagus untuk chat dengan teman-teman. Fiturnya lengkap dan mudah digunakan.",
             "Aplikasi sering crash ketika membuka sticker store. Sangat mengganggu.",
@@ -241,23 +309,23 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
             "Voice message clear, bagus untuk yang malas ketik."
         ]
         
+        # Repeat samples to fill 'n'
         df = pd.DataFrame({
             'content': sample_reviews * (n // len(sample_reviews) + 1),
-            'score': np.random.randint(1, 6, n),
-            'at': pd.date_range(start='2024-01-01', periods=n, freq='D')
+            'score': np.random.randint(1, 6, (n // len(sample_reviews) + 1) * len(sample_reviews)),
+            'at': pd.date_range(start='2024-01-01', periods=(n // len(sample_reviews) + 1) * len(sample_reviews), freq='D')
         })
-        df = df.head(n)  # Limit to requested number
-        
+        df = df.head(n)
         st.info(f"Menggunakan {len(df)} ulasan sample untuk demonstrasi")
 
     st.success(f"Berhasil mengambil {len(df)} ulasan!")
     
     # Show sample reviews
-    with st.expander("Lihat contoh ulasan"):
+    with st.expander("Lihat contoh ulasan mentah"):
         st.dataframe(df.head(10))
 
     # Perform ABSA inference
-    with st.spinner("Melakukan analisis sentimen..."):
+    with st.spinner("Melakukan preprocessing & analisis sentimen..."):
         progress_bar = st.progress(0)
         
         # Initialize result columns
@@ -270,12 +338,12 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
         for topic in topic_mapping.values():
             df[topic] = ""
         
-        # Add cleaned text column
         df["cleaned_content"] = ""
         
         # Process each review
         for idx, row in df.iterrows():
-            predictions, cleaned_text = predict_all_topics(row["content"], models, preprocessor)
+            # Panggil prediksi (yang didalamnya memanggil local_clean_text)
+            predictions, cleaned_text = predict_all_topics(row["content"], models)
             
             # Store cleaned text
             df.at[idx, "cleaned_content"] = cleaned_text
@@ -299,48 +367,40 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
 
     st.success("Analisis selesai!")
 
-    # Display results
+    # ==========================================
+    # 5. DISPLAY RESULTS & VISUALIZATION
+    # ==========================================
+    
     st.subheader("📊 Hasil Analisis")
     
-    # Show dataframe with results (including cleaned text for comparison)
+    # Show dataframe with results
     result_df = df[["content", "cleaned_content"] + topic_columns].copy()
     
-    # Show comparison between original and cleaned text
-    with st.expander("Perbandingan Teks Asli vs Teks Bersih"):
+    with st.expander("Perbandingan Teks Asli vs Teks Bersih (Preprocessing)", expanded=True):
+        st.write("Perhatikan bagaimana 'gak', 'log in', dan stopwords ditangani:")
         comparison_df = df[["content", "cleaned_content"]].head(10)
         comparison_df.columns = ["Teks Asli", "Teks Bersih"]
         st.dataframe(comparison_df, use_container_width=True)
     
     st.dataframe(result_df, use_container_width=True)
 
-    # Create aggregation for each topic
+    # Analisis per Topik
     st.subheader("📈 Analisis per Topik")
     
     col1, col2, col3 = st.columns(3)
     
     for idx, topic in enumerate(topic_columns):
         with [col1, col2, col3][idx]:
-            st.write(f"**{topic.replace('_', ' ')}**")
+            st.markdown(f"**{topic.replace('_', ' ')}**")
             
-            # Count sentiments for this topic
             sentiment_counts = df[topic].value_counts()
             
-            # Create pie chart only if there's data
             if not sentiment_counts.empty:
                 fig, ax = plt.subplots(figsize=(6, 6))
                 
-                # Define colors for each sentiment
                 colors = {'Positif': '#28a745', 'Negatif': '#dc3545', 'Netral': '#ffc107'}
+                sentiment_colors = [colors.get(x, '#6c757d') for x in sentiment_counts.index]
                 
-                # Create color list based on actual sentiments present
-                sentiment_colors = []
-                for sentiment in sentiment_counts.index:
-                    if sentiment in colors:
-                        sentiment_colors.append(colors[sentiment])
-                    else:
-                        sentiment_colors.append('#6c757d')  # Default gray for unknown sentiments
-                
-                # Create pie chart
                 wedges, texts, autotexts = ax.pie(
                     sentiment_counts.values, 
                     labels=sentiment_counts.index,
@@ -349,48 +409,35 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
                     startangle=90
                 )
                 
-                # Style the text
                 for autotext in autotexts:
                     autotext.set_color('white')
                     autotext.set_fontweight('bold')
                 
-                ax.set_title(f"Distribusi Sentimen\n{topic.replace('_', ' ')}", 
-                           fontsize=10, fontweight='bold')
+                ax.set_title(f"Distribusi Sentimen", fontsize=10, fontweight='bold')
                 st.pyplot(fig)
                 plt.close()
                 
-                # Show sentiment counts as well
                 st.write("Detail:")
                 for sentiment, count in sentiment_counts.items():
                     st.write(f"• {sentiment}: {count}")
             else:
-                st.write("Tidak ada data untuk ditampilkan")
+                st.write("Tidak ada data.")
 
     # Overall sentiment distribution
     st.subheader("📊 Distribusi Sentimen Keseluruhan")
     
-    # Combine all sentiments
     all_sentiments = []
     for topic in topic_columns:
         all_sentiments.extend(df[topic].tolist())
     
-    # Remove empty values
     all_sentiments = [s for s in all_sentiments if s and s.strip()]
     
     if all_sentiments:
         overall_counts = pd.Series(all_sentiments).value_counts()
         
-        # Create overall pie chart
         fig, ax = plt.subplots(figsize=(8, 8))
         colors = {'Positif': '#28a745', 'Negatif': '#dc3545', 'Netral': '#ffc107'}
-        
-        # Create color list based on actual sentiments present
-        sentiment_colors = []
-        for sentiment in overall_counts.index:
-            if sentiment in colors:
-                sentiment_colors.append(colors[sentiment])
-            else:
-                sentiment_colors.append('#6c757d')  # Default gray
+        sentiment_colors = [colors.get(x, '#6c757d') for x in overall_counts.index]
 
         wedges, texts, autotexts = ax.pie(
             overall_counts.values, 
@@ -400,7 +447,6 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
             startangle=90
         )
         
-        # Style the text
         for autotext in autotexts:
             autotext.set_color('white')
             autotext.set_fontweight('bold')
@@ -416,7 +462,6 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
 
         # Summary statistics
         st.subheader("📋 Ringkasan Statistik")
-        
         col1, col2 = st.columns(2)
         
         with col1:
@@ -428,12 +473,6 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
             negative_ratio = (pd.Series(all_sentiments) == 'Negatif').sum() / len(all_sentiments) * 100
             st.metric("Sentimen Positif", f"{positive_ratio:.1f}%")
             st.metric("Sentimen Negatif", f"{negative_ratio:.1f}%")
-            
-        # Show detailed counts
-        st.subheader("Detail Distribusi Sentimen")
-        for sentiment, count in overall_counts.items():
-            percentage = (count / len(all_sentiments)) * 100
-            st.write(f"**{sentiment}**: {count} ulasan ({percentage:.1f}%)")
     else:
         st.warning("Tidak ada data sentimen untuk ditampilkan")
 
@@ -456,11 +495,10 @@ pada ulasan LINE Messenger menggunakan model IndoBERT yang
 telah di-fine-tune untuk 3 topik:
 
 1. **Pengalaman Umum Penggunaan**
-2. **Fitur Tambahan** 
-3. **Login dan Registrasi Akun**
+2. **Fitur Tambahan** 3. **Login dan Registrasi Akun**
 
-Model yang digunakan:
-- Cheruno/Topic_1
-- Cheruno/Topic_2  
-- Cheruno/Topic_3
+Preprocessing Custom:
+- Normalisasi kata alay (gak -> tidak)
+- Stopword removal (kecuali 'tidak')
+- Cleaning simbol & URL
 """)
