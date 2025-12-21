@@ -6,3 +6,4 @@ huggingface_hub
 google-play-scraper
 matplotlib
 numpy
+sastrawi
