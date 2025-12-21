@@ -358,87 +358,134 @@ if st.sidebar.button("🚀 Jalankan Analisis", type="primary"):
     topic_columns = list(topic_mapping.values())
     st.success("Analisis selesai!")
 
-    # ==========================================
-    # 5. DISPLAY RESULTS
+# ==========================================
+    # 5. DISPLAY RESULTS & VISUALIZATION
     # ==========================================
     
     st.subheader("📊 Hasil Analisis")
+    
+    # Show dataframe with results
     result_df = df[["content", "cleaned_content"] + topic_columns].copy()
     
-    with st.expander("Perbandingan Teks Asli vs Hasil Preprocessing (Stemmed)", expanded=True):
-        st.write("Perhatikan kata seperti 'makanannya' -> 'makan', 'membuka' -> 'buka':")
+    with st.expander("Perbandingan Teks Asli vs Teks Bersih (Preprocessing)", expanded=True):
         comparison_df = df[["content", "cleaned_content"]].head(10)
-        comparison_df.columns = ["Teks Asli", "Teks Bersih (Stemmed)"]
+        comparison_df.columns = ["Teks Asli", "Teks Bersih"]
         st.dataframe(comparison_df, use_container_width=True)
     
     st.dataframe(result_df, use_container_width=True)
 
-    # ... (Bagian visualisasi Chart sama seperti sebelumnya) ...
+    # Analisis per Topik
     st.subheader("📈 Analisis per Topik")
+    
     col1, col2, col3 = st.columns(3)
     
     for idx, topic in enumerate(topic_columns):
         with [col1, col2, col3][idx]:
             st.markdown(f"**{topic.replace('_', ' ')}**")
+            
             sentiment_counts = df[topic].value_counts()
+            
             if not sentiment_counts.empty:
                 fig, ax = plt.subplots(figsize=(6, 6))
+                
                 colors = {'Positif': '#28a745', 'Negatif': '#dc3545', 'Netral': '#ffc107'}
                 sentiment_colors = [colors.get(x, '#6c757d') for x in sentiment_counts.index]
-                wedges, texts, autotexts = ax.pie(sentiment_counts.values, labels=sentiment_counts.index, autopct='%1.1f%%', colors=sentiment_colors, startangle=90)
+                
+                wedges, texts, autotexts = ax.pie(
+                    sentiment_counts.values, 
+                    labels=sentiment_counts.index,
+                    autopct='%1.1f%%',
+                    colors=sentiment_colors,
+                    startangle=90
+                )
+                
                 for autotext in autotexts:
                     autotext.set_color('white')
                     autotext.set_fontweight('bold')
+                
                 ax.set_title(f"Distribusi Sentimen", fontsize=10, fontweight='bold')
                 st.pyplot(fig)
                 plt.close()
+                
+                st.write("Detail:")
+                for sentiment, count in sentiment_counts.items():
+                    st.write(f"• {sentiment}: {count}")
             else:
                 st.write("Tidak ada data.")
 
-    # ... (Bagian Overall Chart sama seperti sebelumnya) ...
+    # Overall sentiment distribution
     st.subheader("📊 Distribusi Sentimen Keseluruhan")
+    
     all_sentiments = []
     for topic in topic_columns:
         all_sentiments.extend(df[topic].tolist())
+    
     all_sentiments = [s for s in all_sentiments if s and s.strip()]
     
     if all_sentiments:
         overall_counts = pd.Series(all_sentiments).value_counts()
+        
         fig, ax = plt.subplots(figsize=(8, 8))
         colors = {'Positif': '#28a745', 'Negatif': '#dc3545', 'Netral': '#ffc107'}
         sentiment_colors = [colors.get(x, '#6c757d') for x in overall_counts.index]
-        wedges, texts, autotexts = ax.pie(overall_counts.values, labels=overall_counts.index, autopct='%1.1f%%', colors=sentiment_colors, startangle=90)
+
+        wedges, texts, autotexts = ax.pie(
+            overall_counts.values, 
+            labels=overall_counts.index,
+            autopct='%1.1f%%',
+            colors=sentiment_colors,
+            startangle=90
+        )
+        
         for autotext in autotexts:
             autotext.set_color('white')
             autotext.set_fontweight('bold')
             autotext.set_fontsize(12)
+        
         for text in texts:
             text.set_fontsize(12)
             text.set_fontweight('bold')
+        
         ax.set_title("Distribusi Sentimen Keseluruhan", fontsize=14, fontweight='bold')
         st.pyplot(fig)
         plt.close()
 
-        # Statistik
+        # Summary statistics
+        st.subheader("📋 Ringkasan Statistik")
         col1, col2 = st.columns(2)
+        
         with col1:
             st.metric("Total Ulasan", len(df))
             st.metric("Rata-rata Rating", f"{df['score'].mean():.2f}/5")
+        
         with col2:
             positive_ratio = (pd.Series(all_sentiments) == 'Positif').sum() / len(all_sentiments) * 100
             negative_ratio = (pd.Series(all_sentiments) == 'Negatif').sum() / len(all_sentiments) * 100
             st.metric("Sentimen Positif", f"{positive_ratio:.1f}%")
             st.metric("Sentimen Negatif", f"{negative_ratio:.1f}%")
-    
-    # Download
+    else:
+        st.warning("Tidak ada data sentimen untuk ditampilkan")
+
+    # Download results
     st.subheader("💾 Unduh Hasil")
     csv = result_df.to_csv(index=False)
-    st.download_button(label="📥 Unduh CSV", data=csv, file_name=f"absa_line_stemmed_{n}.csv", mime="text/csv")
+    st.download_button(
+        label="📥 Unduh hasil sebagai CSV",
+        data=csv,
+        file_name=f"absa_line_reviews_{n}.csv",
+        mime="text/csv"
+    )
 
+# Information about the app
 st.sidebar.markdown("---")
+st.sidebar.markdown("### ℹ️ Tentang Aplikasi")
 st.sidebar.markdown("""
-### ℹ️ Info Preprocessing
-- **Stemming**: Sastrawi
-- **Normalization**: Kamus Custom
-- **Stopwords**: Custom List
+Aplikasi ini melakukan Analisis Sentimen Berbasis Aspek (ABSA) 
+pada ulasan LINE Messenger menggunakan model IndoBERT yang 
+telah di-fine-tune untuk 3 topik:
+
+1. **Pengalaman Umum Penggunaan**
+2. **Fitur Tambahan** 3. **Login dan Registrasi Akun**
+
 """)
+
