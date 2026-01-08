@@ -69,8 +69,6 @@ def get_text_resources():
         "hp": "ponsel", "handphone": "ponsel", 
         "download": "unduh", "donlot": "unduh", 
         "update": "pembaruan", "updet": "pembaruan", 
-        "login": "masuk", "log in": "masuk", "sign in": "masuk",
-        "log out": "keluar", 
         "notif": "notifikasi", 
         "verif": "verifikasi", 
         "no": "nomor", "nmr": "nomor", 
@@ -93,6 +91,10 @@ def get_text_resources():
     }
 
     custom_stopwords = {
+        "yang", "dan", "di", "ke", "dari", "ini", "itu", "untuk", "pada",
+        "adalah", "sebagai", "dengan", "karena", "jika", "namun", "tetapi",
+        "atau", "serta", "oleh", "saat", "dalam", "bisa", "sudah", "ada",
+        "akan", "apakah", "bagaimana", "kenapa", "siapa", "dimana",
         "dan", "atau", "tetapi", "tapi", "juga", 
         "yang", "di", "ke", "dari", "pada", "dalam", "untuk", "bagi", "kepada", "oleh",
         "ini", "itu", "tersebut", "disini", "disitu", 
@@ -112,7 +114,7 @@ def get_text_resources():
         "hari", "tanggal", "bulan", "tahun", "jam", "waktu",
         "kali", "tiap", "setiap", 
         "apa", "kenapa", "bagaimana", "dimana", "siapa", 
-        "halo", "hai", "min", "admin", "kak", "gan", "sis", "bro"
+        "halo", "hai", "min", "admin", "kak", "gan", "sis", "bro", "loh"
     }
     
     return norm_dict, custom_stopwords
@@ -488,4 +490,5 @@ telah di-fine-tune untuk 3 topik:
 2. **Fitur Tambahan** 3. **Login dan Registrasi Akun**
 
 """)
+
 
