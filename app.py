@@ -191,8 +191,8 @@ def load_models():
     models = {}
     model_names = {
         "Topic_1": "Cheruno/Topic_1",
-        "Topic_2": "Cheruno/Topic_2", 
-        "Topic_3": "Cheruno/Topic_3"
+        "Topic_2": "Cheruno/Topic_3", 
+        "Topic_3": "Cheruno/Topic_2"
     }
     
     for topic, model_name in model_names.items():
@@ -490,6 +490,7 @@ telah di-fine-tune untuk 3 topik:
 2. **Fitur Tambahan** 3. **Login dan Registrasi Akun**
 
 """)
+
 
 
 
